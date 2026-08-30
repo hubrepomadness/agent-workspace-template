@@ -1,0 +1,38 @@
+{
+  "taskId": "implement-semantic-graph-compression-protocol",
+  "title": "Implement Semantic Graph Compression Protocol",
+  "objective": "Create a Python module in src/graph_compressor.py that takes a NetworkX graph JSON, reduces redundant node clusters based on structural equivalence, and returns the compressed graph. Output must include unit tests in tests/test_graph_compressor.py.",
+  "inputs": {
+    "paths": [
+      "src/",
+      "tests/",
+      "tasks/schema.json"
+    ],
+    "commands": [],
+    "context": ""
+  },
+  "targetOutputs": {
+    "artifacts": [],
+    "spec": "src/graph_compressor.py and tests/test_graph_compressor.py; the module exposes compress_graph(graph_json: dict) -> dict returning a graph JSON with redundant structurally-equivalent nodes collapsed into representative supernodes, preserving reachability."
+  },
+  "verificationTests": [
+    {
+      "id": "schema.validates",
+      "command": "python agent_hub.py validate --task implement-semantic-graph-compression-protocol",
+      "expect": "exit_zero"
+    },
+    {
+      "id": "module.importable",
+      "command": "python -c \"import importlib.util,sys; sys.exit(0)\"",
+      "expect": "exit_zero"
+    }
+  ],
+  "priority": "P1",
+  "status": "open",
+  "assignee": null,
+  "dependsOn": [],
+  "createdAt": "2026-08-30T13:34:58Z",
+  "completedAt": null,
+  "prNumber": null,
+  "memory": null
+}
