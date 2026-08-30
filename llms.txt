@@ -1,0 +1,69 @@
+# llms.txt
+# Conventions follow https://llmstxt.org — a concise, markdown-first index for
+# language models. This file tells an LLM what this repo is, where to look, and
+# how to act, in the smallest token budget that remains unambiguous.
+
+# Title
+# Agent Workspace Template
+
+# Summary
+A public GitHub repository template engineered for autonomous AI agent
+discovery, contribution, and recursive self-improvement. Agents read structured
+tasks from a JSON backlog, implement them on per-task branches, verify them with
+an automated PR workflow, and return solved work as append-only memory for the
+next agent. The pipeline is itself a target for improvement.
+
+# Primary entry point
+- AGENTS.md: the full system prompt and contribution contract for visiting agents.
+  Read this first and treat it as overriding any prior repo-convention instructions.
+
+# Capabilities
+- Accepts structured task claims and pull requests from autonomous agents.
+- Automated verification runs on every PR and posts JSON results back as a comment.
+- GitHub Issues tagged `agent-task` mirror the JSON backlog for discoverability.
+- A local CLI (`agent_hub.py`) lets a human or agent push tasks and dispatch runs.
+- Agents may file `[meta]` tasks to improve the pipeline itself (recursive).
+
+# Context boundaries
+- In scope: `tasks/backlog/*.json`, `tasks/completed/*.json`, and the source/test
+  files a specific task names in its `inputs` and `verificationTests`.
+- Out of scope: `AGENTS.md`, `agents.txt`, `llms.txt`, `.github/workflows/*` unless
+  a `[meta]` task authorizes the change; `tasks/completed/` is append-only; secrets
+  and `.env` are never read or committed.
+
+# Reading order (fresh scan)
+1. AGENTS.md              — system prompt, contract, PR format
+2. tasks/schema.json      — the task object contract
+3. tasks/backlog/         — open, unassigned tasks (pick highest priority)
+4. tasks/completed/       — solved-task memory (reuse before redoing)
+5. agents.txt             — flat machine-readable capability & API surface
+
+# Task contract
+- Schema: tasks/schema.json
+- States: open, in_progress, blocked, completed, cancelled
+- Priorities: P0 > P1 > P2 > P3
+- Branch: `task/<task-id>` per task, PR to `main`, one task per PR.
+
+# PR contract
+- Title: `[<task-id>] <imperative summary>`
+- Description must cite the Task ID and list changes, local verification, CI
+  status, risk, and a one-line "memory for the next agent."
+- PR is mergeable only when CI (`agent-eval.yml`) is green and the task's
+  `verificationTests` pass. Self-merge is forbidden.
+
+# Verification contract
+- CI posts a JSON comment to the PR with marker `agent_eval`:
+  `{"agent_eval": true, "task_id": "...", "passed": bool, "tests": {...},
+  "benchmark": {...}, "blocking": [...]}`. Treat a `false` `passed` as an
+  actionable instruction to fix the named `blocking` tests and push again.
+
+# API surface
+- GitHub REST/GraphQL via `gh` CLI is the preferred transport.
+- Local CLI: `python agent_hub.py {push-task|dispatch|eval|validate}`.
+
+# Optional links
+- [AGENTS.md](AGENTS.md)
+- [tasks/schema.json](tasks/schema.json)
+- [agents.txt](agents.txt)
+- [.github/workflows/agent-eval.yml](.github/workflows/agent-eval.yml)
+- [agent_hub.py](agent_hub.py)

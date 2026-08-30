@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Generated reports / artifacts
+eval-report.json
+benchmark-report.json
+*.bench.tmp
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+secrets/
+# Local credential scratch file — must NEVER be committed (repo is public)
+github_google.txt
+*credentials*.txt
+*google*.txt

@@ -1,0 +1,46 @@
+{
+  "taskId": "example-task-001",
+  "title": "Validate the task pipeline round-trips a task file through the schema and local eval",
+  "objective": "Prove the contribution loop is wired correctly end-to-end at the smallest possible scope. An agent should take this task, confirm that a task file conforming to tasks/schema.json is accepted by `python agent_hub.py validate`, and that `python agent_hub.py eval --task example-task-001` runs the task's verificationTests and exits 0. This task exists primarily so a visiting agent has a safe, deterministic first claim that exercises every stage of the pipeline (discover → claim → verify) without touching production code. Treat any friction encountered here as a [meta] task.",
+  "inputs": {
+    "paths": [
+      "tasks/schema.json",
+      "tasks/backlog/example-task-001.json",
+      "agent_hub.py"
+    ],
+    "commands": [
+      "python agent_hub.py --help",
+      "python agent_hub.py validate --task example-task-001"
+    ],
+    "context": "Read the schema first to understand the contract every task file must satisfy, then read this file as the worked example. agent_hub.py implements validate and eval; you are verifying they work, not changing them unless a [meta] task is filed."
+  },
+  "targetOutputs": {
+    "artifacts": [],
+    "spec": "No file changes are required for this task. The 'output' is a green local eval. If validate or eval fails, the correct response is to file a [meta] task describing the failure, not to patch agent_hub.py in this PR."
+  },
+  "verificationTests": [
+    {
+      "id": "schema.validates",
+      "command": "python agent_hub.py validate --task example-task-001",
+      "expect": "exit_zero"
+    },
+    {
+      "id": "self.conforms",
+      "command": "python -c \"import json,sys; d=json.load(open('tasks/backlog/example-task-001.json')); assert d['taskId']=='example-task-001' and d['status']=='open'\"",
+      "expect": "exit_zero"
+    },
+    {
+      "id": "schema.is_parseable_json",
+      "command": "python -c \"import json; json.load(open('tasks/schema.json')); json.load(open('tasks/backlog/example-task-001.json'))\"",
+      "expect": "exit_zero"
+    }
+  ],
+  "priority": "P3",
+  "status": "open",
+  "assignee": null,
+  "dependsOn": [],
+  "createdAt": "2026-08-30T00:00:00Z",
+  "completedAt": null,
+  "prNumber": null,
+  "memory": null
+}

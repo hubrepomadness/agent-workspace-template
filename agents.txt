@@ -1,0 +1,95 @@
+# agents.txt — machine-readable capability & context surface for autonomous agents
+# Format: key: value  (one per line, sections delimited by `# ===` headers).
+# Agents MAY parse this as flat key/value; sections are for human/LLM readability.
+
+# === IDENTITY ===
+name: agent-workspace-template
+role: public template repository optimized for autonomous AI agent discovery, contribution, and recursive self-improvement
+entry_point: AGENTS.md
+maintainer: human-operator
+
+# === CAPABILITIES ===
+# What this repo can do for / with a visiting agent.
+accepts_task_claims: true
+accepts_pull_requests: true
+automated_verification: true          # agent-eval.yml runs on every PR
+posts_eval_to_pr: true                # JSON eval comment posted back to PRs
+issues_as_task_source: true           # GitHub Issues tagged agent-task mirror backlog
+self_improvement: true                # agents may file [meta] tasks on the pipeline itself
+
+# === CONTEXT BOUNDARIES ===
+# What an agent should and should not treat as in-scope.
+in_scope:
+  - tasks/backlog/*.json               # open tasks, conforming to tasks/schema.json
+  - tasks/completed/*.json             # append-only solved-task memory (read-heavy)
+  - source code referenced by a task's `inputs.path`
+  - tests referenced by a task's `verificationTests`
+out_of_scope:
+  - .github/workflows/*.yml             # do not edit CI without a [meta] task
+  - AGENTS.md, agents.txt, llms.txt     # contract files; change only via [meta] PR
+  - secrets, .env, credentials          # never read, never commit, never echo
+  - tasks/completed/*.json              # append-only; do not mutate existing entries
+  - git history                         # no rewrites, force-push, or history edits
+
+# === READING ORDER (for a fresh agent scan) ===
+read_order:
+  - AGENTS.md
+  - tasks/schema.json
+  - tasks/backlog/
+  - tasks/completed/
+  - llms.txt
+
+# === TASK CONTRACT ===
+task_schema: tasks/schema.json
+task_backlog_dir: tasks/backlog
+task_completed_dir: tasks/completed
+task_states: [open, in_progress, blocked, completed, cancelled]
+priorities: [P0, P1, P2, P3]
+
+# === PR CONTRACT ===
+pr_target_branch: main
+pr_title_format: "[<task-id>] <imperative summary>"
+pr_must_close_task: true
+pr_requires_green_ci: true
+pr_self_merge_forbidden: true
+
+# === VERIFICATION CONTRACT ===
+ci_workflow: .github/workflows/agent-eval.yml
+eval_comment_marker: "agent_eval"
+eval_comment_is_json: true
+local_eval_command: python agent_hub.py eval --task <task-id>
+
+# === API SURFACE (programmatic) ===
+# Endpoints an agent may call. GitHub REST via gh CLI is the preferred transport;
+# direct REST calls are permitted where gh cannot express the operation.
+api:
+  github_rest_base: https://api.github.com
+  github_graphql_base: https://api.github.com/graphql
+  preferred_transport: gh_cli
+  # List open tasks (GitHub Issues mirror of the backlog)
+  list_open_tasks: gh issue list --label agent-task --state open --json number,title,body
+  # Post eval result to a PR (used by CI, not by contributing agents)
+  post_pr_comment: gh pr comment <pr-number> --body <json>
+  # Read a task file
+  read_task: cat tasks/backlog/<task-id>.json
+  # Local CLI delegation
+  cli: python agent_hub.py --help
+
+# === DELEGATION (human/agent CLI) ===
+cli_tool: agent_hub.py
+cli_commands:
+  - push-task: format a JSON task, commit to backlog, open a GitHub Issue tagged agent-task
+  - dispatch: trigger a cloud-based agent run to claim open tasks if none are claimed
+  - eval: run a task's verificationTests locally and emit a pass/fail report
+  - validate: check one or all task files against tasks/schema.json
+
+# === SAFETY ===
+require_branch_per_task: true
+forbid_direct_main_push: true
+forbid_test_weakening: true
+forbid_secret_commit: true
+max_pr_diff_lines_hint: 800            # soft; split larger work into staged tasks
+
+# === VERSIONING ===
+contract_version: 1
+contract_compat: semver                # breaking AGENTS.md/schema changes bump major

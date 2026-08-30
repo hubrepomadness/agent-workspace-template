@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-workspace.template/tasks/schema.json",
+  "title": "Agent Workspace Task",
+  "description": "Machine-readable task contract for the autonomous agent contribution pipeline. Every file under tasks/backlog/ and tasks/completed/ MUST conform to this schema.",
+  "type": "object",
+  "required": [
+    "taskId",
+    "title",
+    "objective",
+    "inputs",
+    "targetOutputs",
+    "verificationTests",
+    "priority",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "description": "Globally unique task identifier. Matches the filename (minus .json) and the PR title prefix.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "examples": ["example-task-001"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Short imperative title. Prefix with '[meta] ' for pipeline-improvement tasks.",
+      "minLength": 3,
+      "maxLength": 120
+    },
+    "objective": {
+      "type": "string",
+      "description": "One to three paragraphs stating what 'done' means in human terms. An agent should be able to restate this without ambiguity."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "The materials an agent needs to start: files to read, commands to run, resources to fetch.",
+      "required": ["paths", "context"],
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "type": "array",
+          "description": "Repo-relative files/dirs the agent should read first. Empty array is allowed for greenfield tasks.",
+          "items": { "type": "string" }
+        },
+        "commands": {
+          "type": "array",
+          "description": "Commands the agent should run to gather context (read-only by intent).",
+          "items": { "type": "string" }
+        },
+        "context": {
+          "type": "string",
+          "description": "Prose explaining why these inputs matter and what to extract from them."
+        }
+      }
+    },
+    "targetOutputs": {
+      "type": "object",
+      "description": "The concrete artifacts 'done' produces.",
+      "required": ["artifacts"],
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "description": "Repo-relative paths the agent must create or modify.",
+          "items": { "type": "string" }
+        },
+        "spec": {
+          "type": "string",
+          "description": "Detailed specification of the artifacts: interfaces, formats, invariants. May reference a file path containing the spec."
+        }
+      }
+    },
+    "verificationTests": {
+      "type": "array",
+      "description": "Acceptance tests. A PR is mergeable only when every entry here passes. Each entry maps a test id to how to run it.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "command", "expect"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable identifier surfaced in the CI eval comment's 'blocking' array on failure.",
+            "pattern": "^[a-zA-Z0-9_.-]+$"
+          },
+          "command": {
+            "type": "string",
+            "description": "Shell command to run from repo root. Exit 0 == pass."
+          },
+          "expect": {
+            "type": "string",
+            "enum": ["exit_zero", "exit_nonzero", "contains", "json_match"],
+            "description": "Pass criterion. 'contains'/'json_match' require 'assert'."
+          },
+          "assert": {
+            "type": "string",
+            "description": "For 'contains': a substring the command stdout must include. For 'json_match': a JSONPath/JSON value the output must contain."
+          },
+          "benchmark": {
+            "type": "boolean",
+            "description": "If true, this entry is a benchmark; the regressionThreshold governs acceptable change.",
+            "default": false
+          },
+          "regressionThreshold": {
+            "type": "number",
+            "description": "Max allowed fractional regression (e.g. 0.10 = 10% slower still passes). Only meaningful when benchmark=true.",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["P0", "P1", "P2", "P3"],
+      "description": "P0 critical > P1 high > P2 medium > P3 low. Agents claim the highest-priority open task first."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "in_progress", "blocked", "completed", "cancelled"],
+      "description": "Lifecycle state. Backlog files are 'open' or 'in_progress'; completed/ files are 'completed'."
+    },
+    "assignee": {
+      "type": ["string", "null"],
+      "description": "Agent identity that claimed the task. null/absent means unassigned. Claiming agents set this in their first commit."
+    },
+    "dependsOn": {
+      "type": "array",
+      "description": "taskIds that must reach 'completed' before this task can start.",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 creation timestamp."
+    },
+    "completedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO-8601 completion timestamp; set when moved to tasks/completed/."
+    },
+    "prNumber": {
+      "type": ["integer", "null"],
+      "description": "The GitHub PR number that closed this task."
+    },
+    "memory": {
+      "type": ["string", "null"],
+      "description": "One to two lines the next agent in this area should know. Promoted from the PR's 'Memory for the next agent' section on merge."
+    }
+  }
+}

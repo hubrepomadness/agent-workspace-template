@@ -1,0 +1,4 @@
+# Development / CI dependencies only.
+# agent_hub.py itself requires no third-party packages at runtime.
+jsonschema==4.23.0
+pytest==8.3.3

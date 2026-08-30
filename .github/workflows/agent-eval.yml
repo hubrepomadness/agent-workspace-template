@@ -1,0 +1,230 @@
+# Automated verification for agent-contributed PRs.
+# Runs on every pull request. Executes unit tests + benchmark evals derived from
+# the task each PR closes, then posts a machine-readable JSON result back to the
+# PR as a comment so visiting agents can auto-correct failing work.
+#
+# Contract (mirrored in agents.txt / llms.txt):
+#   The PR comment contains a JSON block with marker `agent_eval`.
+#   {"agent_eval": true, "task_id": "<id>", "passed": <bool>,
+#    "tests": {"<id>": {"passed": <bool>, "exit": <int>, "output": "<str>"}},
+#    "benchmark": {...}, "blocking": ["<failing test ids>"]}
+name: Agent Eval
+
+on:
+  pull_request:
+    # Evaluate every PR regardless of target; the job guards main specifically.
+    types: [opened, synchronize, reopened]
+
+# Prevent concurrent overlapping evals on the same PR wasting minutes.
+concurrency:
+  group: agent-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # required to post the eval comment via gh CLI
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          # We need full history to compare benchmarks against main if needed.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          # Minimal: stdlib only is required for agent_hub.py. jsonschema is the
+          # one third-party dep the eval harness genuinely needs; keep it pinned.
+          python -m pip install jsonschema==4.23.0
+          # gh CLI is preinstalled on ubuntu-latest runners; verify it is present.
+          command -v gh >/dev/null 2>&1 || { echo "gh CLI not found"; exit 1; }
+
+      - name: Detect task from PR
+        id: task
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          # PR titles follow "[<task-id>] <summary>". Extract the bracketed id.
+          TASK_ID="$(printf '%s' "$PR_TITLE" | sed -nE 's/^\[([a-z0-9]+(-[a-z0-9]+)*)\].*/\1/p')"
+          if [ -z "$TASK_ID" ]; then
+            echo "No task id found in PR title '$PR_TITLE'. Skipping task-specific eval."
+            echo "task_id=" >> "$GITHUB_OUTPUT"
+            echo "has_task=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Detected task: $TASK_ID"
+            echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+            echo "has_task=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run repo unit tests
+        id: unit
+        run: |
+          set -euo pipefail
+          # Repo-wide unit tests. If a tests/ dir or pytest is present, run it.
+          if [ -d tests ]; then
+            python -m pytest -q 2>&1 | tee unit.log || true
+          else
+            echo "No tests/ directory found; repo-wide unit suite is empty." | tee unit.log
+          fi
+
+      - name: Run task verification eval
+        id: eval
+        if: steps.task.outputs.has_task == 'true'
+        run: |
+          set -euo pipefail
+          # agent_hub.py eval writes a JSON report to eval-report.json and exits
+          # non-zero on any failing verificationTest.
+          python agent_hub.py eval --task "${{ steps.task.outputs.task_id }}" \
+            --report eval-report.json || true
+          echo "report_path=eval-report.json" >> "$GITHUB_OUTPUT"
+
+      - name: Run benchmark suite
+        id: bench
+        if: steps.task.outputs.has_task == 'true'
+        run: |
+          set -euo pipefail
+          # Tasks declare benchmarks via verificationTests[*].benchmark=true.
+          # agent_hub.py bench runs only those and writes benchmark-report.json.
+          python agent_hub.py bench --task "${{ steps.task.outputs.task_id }}" \
+            --report benchmark-report.json 2>&1 | tee bench.log || true
+          echo "bench_path=benchmark-report.json" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble and post JSON eval comment to PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          TASK_ID: ${{ steps.task.outputs.task_id }}
+          HAS_TASK: ${{ steps.task.outputs.has_task }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import json, os, subprocess, pathlib
+
+          pr_number = os.environ["PR_NUMBER"]
+          task_id   = os.environ.get("TASK_ID", "")
+          has_task  = os.environ.get("HAS_TASK") == "true"
+          run_id    = os.environ["RUN_ID"]
+          repo      = os.environ.get("GITHUB_REPOSITORY", "")
+          pr_url    = os.environ.get("PR_URL", "")
+
+          tests = {}
+          benchmark = {}
+          passed = False
+
+          if has_task:
+              report_path = pathlib.Path("eval-report.json")
+              if report_path.exists():
+                  try:
+                      rep = json.loads(report_path.read_text(encoding="utf-8"))
+                  except Exception as e:
+                      rep = {"passed": False, "tests": {}, "blocking": [],
+                             "error": f"report parse failed: {e}"}
+                  tests = rep.get("tests", {})
+                  passed = bool(rep.get("passed", False))
+              else:
+                  passed = False
+                  tests = {"agent_eval": {"passed": False,
+                            "exit": 1, "output": "eval-report.json was not produced"}}
+          else:
+              # No task id in title: this is not a task PR. Still report a
+              # non-blocking informational eval so the agent can self-correct.
+              passed = False
+              tests = {"title_parse": {"passed": False, "exit": 1,
+                        "output": "No [task-id] found in PR title; task-specific eval skipped."}}
+
+          bench_path = pathlib.Path("benchmark-report.json")
+          if has_task and bench_path.exists():
+              try:
+                  benchmark = json.loads(bench_path.read_text(encoding="utf-8"))
+              except Exception:
+                  benchmark = {"error": "benchmark report parse failed"}
+
+          blocking = [tid for tid, r in tests.items() if not r.get("passed", False)]
+
+          payload = {
+              "agent_eval": True,
+              "task_id": task_id or None,
+              "passed": bool(passed) and not blocking,
+              "tests": tests,
+              "benchmark": benchmark,
+              "blocking": blocking,
+              "run_id": run_id,
+              "repo": repo,
+          }
+
+          # Wrap JSON in a fenced block so the raw JSON is trivially machine
+          # extractable while the comment is still human-readable.
+          summary = "PASS" if payload["passed"] else "FAIL"
+          comment_body = (
+              "### Agent Eval — " + summary + "\n\n"
+              + f"Task: `{task_id or 'none detected'}`  |  "
+              + f"Run: {run_id}\n\n"
+              + "Machine-readable result (autonomous agents parse the JSON below):\n"
+              + "```json\n"
+              + json.dumps(payload, indent=2, sort_keys=True)
+              + "\n```\n"
+              + ("\nAll verification tests passed. The PR satisfies the task's "
+                 "acceptance criteria pending human review of intent.\n"
+                 if payload["passed"] else
+                 "\nOne or more verification tests failed. See the `blocking` "
+                 "array above, fix the named tests, push again, and re-read the "
+                 "next eval comment. Do not request human review for mechanical "
+                 "failures — the eval comment is the reviewer for those.\n")
+          )
+
+          # Post via gh CLI. Falls back to the REST API if gh is unavailable.
+          try:
+              subprocess.run(
+                  ["gh", "pr", "comment", str(pr_number), "--body", comment_body],
+                  check=True,
+              )
+              print("Posted eval comment via gh CLI.")
+          except Exception as e:
+              print(f"gh CLI failed ({e}); attempting REST API fallback.")
+              token = os.environ.get("GH_TOKEN")
+              if not token:
+                  raise SystemExit("No GH_TOKEN available to post comment.")
+              import urllib.request
+              body = json.dumps({"body": comment_body}).encode("utf-8")
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments",
+                  data=body,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(req) as resp:
+                  print("Posted eval comment via REST API:", resp.status)
+          PY
+
+      - name: Gate merge on passing eval
+        if: steps.task.outputs.has_task == 'true'
+        env:
+          REPORT: eval-report.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::Task PR produced no eval report; failing the gate."
+            exit 1
+          fi
+          python -c "import json,sys; r=json.load(open('$REPORT')); sys.exit(0 if r.get('passed') else 1)" \
+            || { echo "::error::Task verification tests did not pass. See the eval comment on the PR."; exit 1; }
+          echo "Task verification passed. Gate open (human review of intent still required)."

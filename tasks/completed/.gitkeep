@@ -1,0 +1,5 @@
+# Solved tasks live here as append-only historical agent memory.
+# A task file is moved into this directory (with status set to "completed",
+# completedAt and prNumber filled, and memory populated) when its PR merges.
+# Do not edit or delete existing entries — they are the long-term memory the
+# next agent reads before starting similar work.
